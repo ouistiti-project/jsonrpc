@@ -2,9 +2,26 @@
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
+#include <time.h>
+#include <pthread.h>
 
 #include <jansson.h>
 #include "jsonrpc.h"
+
+#define TYPE_RECEIVE_RESPONSE 'a'
+#define TYPE_SEND_RESPONSE 'r'
+#define TYPE_RECEIVE_REQUEST 'r'
+#define TYPE_SEND_REQUEST 'a'
+#define TYPE_RECEIVE_NOTIFICATION 'n'
+#define TYPE_SEND_NOTIFICATION 'n'
+
+typedef struct jsonrpc_response_s jsonrpc_response_t;
+struct jsonrpc_response_s
+{
+	unsigned long id;
+	jsonrpc_method_prototype funcptr;
+	jsonrpc_response_t *next;
+};
 
 json_t *jsonrpc_error_object(int code, const char *message, json_t *data)
 {
@@ -95,32 +112,32 @@ json_t *jsonrpc_result_response(json_t *json_id, json_t *json_result)
 	return response;
 }
 
-json_t *jsonrpc_validate_request(json_t *json_request, const char **str_method, json_t **json_params, json_t **json_id)
+int jsonrpc_validate_request(json_t *json_request, const char **str_method, json_t **json_params, json_t **json_id, json_t **json_error)
 {
 	size_t flags = 0;
 	json_error_t error;
 	const char *str_version = NULL;
-	int rc;
+	int rc = 0;
 	json_t *data = NULL;
 	int valid_id = 0;
+	json_t *json_result = NULL;
 
 	*str_method = NULL;
 	*json_params = NULL;
 	*json_id = NULL;
+	*json_error = NULL;
 
-	rc = json_unpack_ex(json_request, &error, flags, "{s:s,s:s,s?o,s?o}",
+	rc = json_unpack_ex(json_request, &error, flags, "{s:s,s?s,s?o,s?o,s?o,s?o}",
 		"jsonrpc", &str_version,
 		"method", str_method,
 		"params", json_params,
+		"result", &json_result,
+		"error", json_error,
 		"id", json_id
 	);
+
 	if (rc==-1) {
 		data = json_string(error.text);
-		goto invalid;
-	}
-
-	if (0!=strcmp(str_version, "2.0")) {
-		data = json_string("\"jsonrpc\" MUST be exactly \"2.0\"");
 		goto invalid;
 	}
 
@@ -129,26 +146,49 @@ json_t *jsonrpc_validate_request(json_t *json_request, const char **str_method, 
 			data = json_string("\"id\" MUST contain a String, Number, or NULL value if included");
 			goto invalid;
 		}
+		if (json_is_null(*json_id))
+			rc = TYPE_RECEIVE_NOTIFICATION;
+	}
+	else {
+		rc = TYPE_RECEIVE_NOTIFICATION;
 	}
 
 	/*  Note that we only return json_id in the error response after we have established that it is jsonrpc/2.0 compliant */
 	/*  otherwise we would be returning a non-compliant response ourselves! */
 	valid_id = 1;
 
-	if (*json_params) {
+	if (*json_params && str_method) {
+		if ( rc != TYPE_RECEIVE_NOTIFICATION)
+			rc = TYPE_RECEIVE_REQUEST;
 		if (!json_is_array(*json_params) && !json_is_object(*json_params)) {
 			data = json_string("\"params\" MUST be Array or Object if included");
 			goto invalid;
 		}
 	}
+	else if (json_result) {
+		rc = TYPE_RECEIVE_RESPONSE;
+		if (!json_is_array(json_result) && !json_is_object(json_result) && !json_is_null(json_result)) {
+			data = json_string("\"result\" MUST be Array or Object if included");
+			goto invalid;
+		}
+		*json_params = json_result;
+	}
+	else if (*str_method == NULL)
+		rc = TYPE_RECEIVE_RESPONSE;
 
-	return NULL;
+	if (0!=strcmp(str_version, "2.0")) {
+		data = json_string("\"jsonrpc\" MUST be exactly \"2.0\"");
+		goto invalid;
+	}
+
+	return rc;
 
 invalid:
 	if (!valid_id)
 		*json_id = NULL;
-	return jsonrpc_error_response(*json_id,
-		jsonrpc_error_object_predefined(JSONRPC_INVALID_REQUEST, data));
+	*json_error =
+		jsonrpc_error_object_predefined(JSONRPC_INVALID_REQUEST, data);
+	return rc;
 }
 
 json_t *jsonrpc_validate_params(json_t *json_params, const char *params_spec)
@@ -181,25 +221,51 @@ json_t *jsonrpc_handle_request_single(json_t *json_request, struct jsonrpc_metho
 	void *userdata)
 {
 	int rc;
-	json_t *json_response;
+	json_t *json_response = NULL;
 	const char *str_method;
 	json_t *json_params, *json_id;
-	json_t *json_result;
-	int is_notification;
+	json_t *json_result = NULL;
+	json_t *json_error = NULL;
+	int is_notification = 0;
 	struct jsonrpc_method_entry_t *entry;
 
-	json_response = jsonrpc_validate_request(json_request, &str_method, &json_params, &json_id);
-	if (json_response)
-		return json_response;
-
+	rc = jsonrpc_validate_request(json_request, &str_method, &json_params, &json_id, &json_error);
 	is_notification = json_id==NULL;
-
-
-	for (entry=method_table; entry->name!=NULL; entry++) {
-		if (0==strcmp(entry->name, str_method))
-			break;
+	if (json_error) {
+		json_response = jsonrpc_error_response(json_id, json_error);
+		goto done;
 	}
-	if (entry->name==NULL) {
+
+	if (rc != TYPE_RECEIVE_RESPONSE)
+	{
+		for (entry=method_table; entry->name!=NULL; entry++) {
+			if (0==strcmp(entry->name, str_method) && entry->type == rc) {
+				break;
+			}
+		}
+	}
+	else {
+		unsigned long id = json_integer_value(json_id);
+		for (entry=method_table; entry->name!=NULL; entry++) {
+			if (entry->next != NULL && entry->type == rc) {
+				struct jsonrpc_method_entry_t *it = entry;
+				while (it->next) {
+					if (it->next->id == id)
+						break;
+					it = it->next;
+				}
+				if (it->next != NULL) {
+					struct jsonrpc_method_entry_t *old;
+					old = it->next;
+					it->next = it->next->next;
+					free(old);
+					break;
+				}
+			}
+		}
+	}
+
+	if (entry == NULL) {
 		json_response = jsonrpc_error_response(json_id,
 				jsonrpc_error_object_predefined(JSONRPC_METHOD_NOT_FOUND, NULL));
 		goto done;
@@ -213,29 +279,35 @@ json_t *jsonrpc_handle_request_single(json_t *json_request, struct jsonrpc_metho
 		}
 	}
 
-	json_response = NULL;
-	json_result = NULL;
-	rc = entry->funcptr(json_params, &json_result, userdata);
-	if (is_notification) {
-		json_decref(json_result);
-		json_result = NULL;
-	} else {
+	if (entry->funcptr != NULL) {
+		rc = entry->funcptr(json_params, &json_result, userdata);
 		if (rc==0) {
 			json_response = jsonrpc_result_response(json_id, json_result);
 		} else {
-			if (!json_result) {
-				/* method did not set a jsonrpc_error_object, create a generic error */
-				json_result = jsonrpc_error_object_predefined(JSONRPC_INTERNAL_ERROR, NULL);
-			}
 			json_response = jsonrpc_error_response(json_id, json_result);
 		}
 	}
-
-done:
-	if (is_notification && json_response) {
-		json_decref(json_response);
-		json_response = NULL;
+	else {
+		json_result = jsonrpc_error_object_predefined(JSONRPC_INTERNAL_ERROR, NULL);
+		json_response = jsonrpc_error_response(json_id, json_result);
 	}
+
+	rc = entry->type;
+done:
+	switch (rc) {
+		case TYPE_SEND_RESPONSE:
+		break;
+		case TYPE_RECEIVE_RESPONSE:
+		case TYPE_RECEIVE_NOTIFICATION:
+		default:
+		if (json_result)
+			json_decref(json_result);
+		if (json_response)
+			json_decref(json_response);
+		json_response = NULL;
+		break;
+	}
+
 	return json_response;
 }
 

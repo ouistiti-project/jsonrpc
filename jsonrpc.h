@@ -1,3 +1,5 @@
+#ifndef __JSONRPC_H__
+#define __JSONRPC_H__
 #include <jansson.h>
 
 #define JSONRPC_PARSE_ERROR -32700
@@ -7,15 +9,21 @@
 #define JSONRPC_INTERNAL_ERROR -32603
 
 typedef int (*jsonrpc_method_prototype)(json_t *json_params, json_t **result, void *userdata);
+
 struct jsonrpc_method_entry_t
 {
+	const char type; /* 'r'=request , 'n'=notification */
 	const char *name;
+	unsigned long id;
 	jsonrpc_method_prototype funcptr;
 	const char *params_spec;
+	struct jsonrpc_method_entry_t *next;
 };
+
 char *jsonrpc_handler(const char *input, size_t input_len, struct jsonrpc_method_entry_t method_table[],
 	void *userdata);
 
 json_t *jsonrpc_error_object(int code, const char *message, json_t *data);
 json_t *jsonrpc_error_object_predefined(int code, json_t *data);
 
+#endif
