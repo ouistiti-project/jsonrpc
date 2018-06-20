@@ -14,9 +14,9 @@ struct jsonrpc_method_entry_t
 {
 	const char type; /* 'r'=request , 'n'=notification */
 	const char *name;
-	unsigned long id;
 	jsonrpc_method_prototype funcptr;
 	const char *params_spec;
+	unsigned long id;
 	struct jsonrpc_method_entry_t *next;
 };
 
