@@ -23,6 +23,10 @@ struct jsonrpc_method_entry_t
 char *jsonrpc_handler(const char *input, size_t input_len, struct jsonrpc_method_entry_t method_table[],
 	void *userdata);
 
+json_t *jsonrpc_request(const char *method, json_t *params,
+			struct jsonrpc_method_entry_t method_table[],
+			unsigned long *id, struct jsonrpc_method_entry_t **pentry);
+
 json_t *jsonrpc_error_object(int code, const char *message, json_t *data);
 json_t *jsonrpc_error_object_predefined(int code, json_t *data);
 

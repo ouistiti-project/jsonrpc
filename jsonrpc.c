@@ -311,14 +311,12 @@ done:
 	return json_response;
 }
 
-char *jsonrpc_handler(const char *input, size_t input_len, struct jsonrpc_method_entry_t method_table[],
+json_t *jsonrpc_response(json_t *json_request,
+	struct jsonrpc_method_entry_t method_table[],
 	void *userdata)
 {
-	json_t *json_request, *json_response;
-	json_error_t error;
-	char *output = NULL;
+	json_t *json_response;
 
-	json_request = json_loadb(input, input_len, 0, &error);
 	if (!json_request) {
 		json_response = jsonrpc_error_response(NULL,
 				jsonrpc_error_object_predefined(JSONRPC_PARSE_ERROR, NULL));
@@ -344,12 +342,77 @@ char *jsonrpc_handler(const char *input, size_t input_len, struct jsonrpc_method
 		json_response = jsonrpc_handle_request_single(json_request, method_table, userdata);
 	}
 
-	if (json_response)
-		output = json_dumps(json_response, JSON_INDENT(2));
+	return json_response;
+}
 
-	json_decref(json_request);
-	json_decref(json_response);
+char *jsonrpc_handler(const char *input, size_t input_len, struct jsonrpc_method_entry_t method_table[],
+	void *userdata)
+{
+	json_t *request, *response;
+	json_error_t error;
+	char *output = NULL;
+
+	request = json_loadb(input, input_len, 0, &error);
+
+	if (!request) {
+		fprintf(stdout, "Syntax error: line %d col %d: %s\n", error.line, error.column, error.text);
+	}
+	response = jsonrpc_response(request, method_table, userdata);
+	if (response)
+		output = json_dumps(response, JSON_INDENT(2));
+
+	json_decref(request);
+	json_decref(response);
 
 	return output;
 }
 
+json_t *jsonrpc_request(const char *method, json_t *params,
+		struct jsonrpc_method_entry_t method_table[],
+		unsigned long *id, struct jsonrpc_method_entry_t **pentry)
+{
+	struct jsonrpc_method_entry_t *entry;
+	json_t *request = NULL;
+
+	for (entry=method_table; entry->name!=NULL; entry++) {
+		if (0==strcmp(entry->name, method))
+			break;
+	}
+
+	if (entry == NULL || entry->name==NULL) {
+		goto done;
+	}
+
+	if (entry->type == TYPE_SEND_REQUEST)	{
+		srandom(time(NULL));
+		*id = random();
+		*pentry = entry;
+	}
+	else {
+		*id = 0;
+		*pentry = entry;
+	}
+
+	if (entry->params_spec) {
+		json_t *error_obj = jsonrpc_validate_params(params, entry->params_spec);
+		if (error_obj) {
+			goto done;
+		}
+	}
+
+	if (*id != 0) {
+		request = json_pack("{s:s,s:i,s:s,s:o}",
+			"jsonrpc", "2.0",
+			"id", *id,
+			"method", method,
+			"params", params);
+	} else {
+		request = json_pack("{s:s,s:s,s:o}",
+			"jsonrpc", "2.0",
+			"method", method,
+			"params", params);
+	}
+	return request;
+done:
+	return NULL;
+}
