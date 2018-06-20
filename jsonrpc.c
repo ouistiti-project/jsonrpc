@@ -68,7 +68,12 @@ json_t *jsonrpc_error_object_predefined(int code, json_t *data)
 	return jsonrpc_error_object(code, message, data);
 }
 
-json_t *jsonrpc_error_response(json_t *json_id, json_t *json_error)
+json_t *jsonrpc_ignore_error_response(json_t *json_id, json_t *json_error)
+{
+	return NULL;
+}
+
+json_t *jsonrpc_request_error_response(json_t *json_id, json_t *json_error)
 {
 	/* json_error reference is stolen */
 
@@ -89,6 +94,8 @@ json_t *jsonrpc_error_response(json_t *json_id, json_t *json_error)
 		"error", json_error);
 	return response;
 }
+
+static jsonrpc_error_response_t jsonrpc_error_response = jsonrpc_request_error_response;
 
 json_t *jsonrpc_result_response(json_t *json_id, json_t *json_result)
 {
@@ -415,4 +422,21 @@ json_t *jsonrpc_request(const char *method, json_t *params,
 	return request;
 done:
 	return NULL;
+}
+
+int jsonrpc_stringify(json_t *jsonrpc, char *output, size_t output_len)
+{
+	int ret;
+	ret = json_dumpb(jsonrpc, output, output_len, 0);
+	return ret;
+}
+
+void jsonrpc_set_errorhandler(jsonrpc_error_response_t error_response)
+{
+	if (error_response == (void *)ERRORHANDLER_REQUEST)
+		jsonrpc_error_response = jsonrpc_request_error_response;
+	else if (error_response != NULL)
+		jsonrpc_error_response = error_response;
+	else
+		jsonrpc_error_response = jsonrpc_ignore_error_response;
 }

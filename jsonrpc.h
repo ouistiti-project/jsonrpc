@@ -30,4 +30,9 @@ json_t *jsonrpc_request(const char *method, json_t *params,
 json_t *jsonrpc_error_object(int code, const char *message, json_t *data);
 json_t *jsonrpc_error_object_predefined(int code, json_t *data);
 
+typedef json_t *(*jsonrpc_error_response_t)(json_t *json_id, json_t *json_error);
+#define ERRORHANDLER_REQUEST 1
+#define ERRORHANDLER_IGNORE 0
+void jsonrpc_set_errorhandler(jsonrpc_error_response_t error_response);
+
 #endif
