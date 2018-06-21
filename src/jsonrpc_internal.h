@@ -8,8 +8,11 @@ json_t *jsonrpc_error_object_predefined(int code, json_t *data);
 json_t *jsonrpc_ignore_error_response(json_t *json_id, json_t *json_error);
 json_t *jsonrpc_request_error_response(json_t *json_id, json_t *json_error);
 
-json_t *jsonrpc_response(json_t *json_request,
+json_t *jsonrpc_jresponse(json_t *json_request,
 	struct jsonrpc_method_entry_t method_table[],
 	void *userdata);
+json_t *jsonrpc_jrequest(const char *method,
+		struct jsonrpc_method_entry_t method_table[], char *userdata,
+		unsigned long *pid);
 
 #endif

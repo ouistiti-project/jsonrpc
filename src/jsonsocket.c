@@ -115,7 +115,7 @@ int jsonsocket_handler(jsonsocket_t *jsocket)
 	}
 	else
 	{
-		response = jsonrpc_response(request, jsocket->method_table, jsocket->userdata);
+		response = jsonrpc_jresponse(request, jsocket->method_table, jsocket->userdata);
 		if (response) {
 			jsonsocket_push(jsocket, response);
 		}
@@ -126,14 +126,14 @@ int jsonsocket_handler(jsonsocket_t *jsocket)
 	return ret;
 }
 
-int jsonsocket_request(jsonsocket_t *jsocket, const char *method, json_t *params)
+int jsonsocket_request(jsonsocket_t *jsocket, const char *method)
 {
 	int ret = -1;
 	json_t *request;
 	unsigned long id;
 	struct jsonrpc_method_entry_t *entry;
 
-	request = jsonrpc_request(method, params, jsocket->method_table, &id, &entry);
+	request = jsonrpc_jrequest(method, jsocket->method_table, jsocket->userdata, &id);
 	if (request) {
 		jsonsocket_push(jsocket, request);
 		if (id > 0) {

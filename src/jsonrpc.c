@@ -79,16 +79,12 @@ json_t *jsonrpc_request_error_response(json_t *json_id, json_t *json_error)
 
 	json_t * response;
 
-	/* json_id could be NULL */
 	if (json_id) {
+		/** json_id may be freed with json_request and json_response **/
 		json_incref(json_id);
-	} else {
-		json_id = json_null();
 	}
 
-	json_error = json_error ? json_error : json_null();
-
-	response = json_pack("{s:s,s:o,s:o}",
+	response = json_pack("{s:s,s:o?,s:o?}",
 		"jsonrpc", "2.0",
 		"id", json_id,
 		"error", json_error);
@@ -148,6 +144,10 @@ int jsonrpc_validate_request(json_t *json_request, const char **str_method, json
 		goto invalid;
 	}
 
+	if (json_error) {
+		/** json_error may be freed by json_request and json_response **/
+		json_incref(*json_error);
+	}
 	if (*json_id) {
 		if (!json_is_string(*json_id) && !json_is_number(*json_id) && !json_is_null(*json_id)) {
 			data = json_string("\"id\" MUST contain a String, Number, or NULL value if included");
@@ -155,6 +155,8 @@ int jsonrpc_validate_request(json_t *json_request, const char **str_method, json
 		}
 		if (json_is_null(*json_id))
 			rc = TYPE_RECEIVE_NOTIFICATION;
+		else
+			rc = TYPE_RECEIVE_REQUEST;
 	}
 	else {
 		rc = TYPE_RECEIVE_NOTIFICATION;
@@ -165,23 +167,22 @@ int jsonrpc_validate_request(json_t *json_request, const char **str_method, json
 	valid_id = 1;
 
 	if (*json_params && str_method) {
-		if ( rc != TYPE_RECEIVE_NOTIFICATION)
-			rc = TYPE_RECEIVE_REQUEST;
-		if (!json_is_array(*json_params) && !json_is_object(*json_params)) {
+		if (!json_is_array(*json_params) && !json_is_object(*json_params) && !json_is_null(*json_params)) {
 			data = json_string("\"params\" MUST be Array or Object if included");
 			goto invalid;
 		}
 	}
-	else if (json_result) {
+	else if (*str_method == NULL) {
 		rc = TYPE_RECEIVE_RESPONSE;
-		if (!json_is_array(json_result) && !json_is_object(json_result) && !json_is_null(json_result)) {
-			data = json_string("\"result\" MUST be Array or Object if included");
-			goto invalid;
+		if (json_result) {
+			if (!json_is_array(json_result) && !json_is_object(json_result) && !json_is_null(json_result)) {
+				json_decref(json_result);
+				data = json_string("\"result\" MUST be Array or Object if included");
+				goto invalid;
+			}
+			*json_params = json_result;
 		}
-		*json_params = json_result;
 	}
-	else if (*str_method == NULL)
-		rc = TYPE_RECEIVE_RESPONSE;
 
 	if (0!=strcmp(str_version, "2.0")) {
 		data = json_string("\"jsonrpc\" MUST be exactly \"2.0\"");
@@ -202,8 +203,8 @@ json_t *jsonrpc_validate_params(json_t *json_params, const char *params_spec)
 {
 	json_t *data = NULL;
 
-	if (strlen(params_spec)==0) {	/*  empty string means no arguments */
-		if (!json_params) {
+	if (params_spec == NULL || strlen(params_spec)==0) {	/*  empty string means no arguments */
+		if (!json_params || json_is_null(json_params)) {
 			/*  no params field: OK */
 		} else if (json_is_array(json_params) && json_array_size(json_params)==0) {
 			/*  an empty Array: OK */
@@ -230,7 +231,8 @@ json_t *jsonrpc_handle_request_single(json_t *json_request, struct jsonrpc_metho
 	int rc;
 	json_t *json_response = NULL;
 	const char *str_method;
-	json_t *json_params, *json_id;
+	json_t *json_params = NULL;
+	json_t *json_id = NULL;
 	json_t *json_result = NULL;
 	json_t *json_error = NULL;
 	int is_notification = 0;
@@ -238,10 +240,6 @@ json_t *jsonrpc_handle_request_single(json_t *json_request, struct jsonrpc_metho
 
 	rc = jsonrpc_validate_request(json_request, &str_method, &json_params, &json_id, &json_error);
 	is_notification = json_id==NULL;
-	if (json_error) {
-		json_response = jsonrpc_error_response(json_id, json_error);
-		goto done;
-	}
 
 	if (rc != TYPE_RECEIVE_RESPONSE)
 	{
@@ -251,7 +249,7 @@ json_t *jsonrpc_handle_request_single(json_t *json_request, struct jsonrpc_metho
 			}
 		}
 	}
-	else {
+	else if (json_id != NULL) {
 		unsigned long id = json_integer_value(json_id);
 		for (entry=method_table; entry->name!=NULL; entry++) {
 			if (entry->next != NULL && entry->type == rc) {
@@ -261,15 +259,20 @@ json_t *jsonrpc_handle_request_single(json_t *json_request, struct jsonrpc_metho
 						break;
 					it = it->next;
 				}
+				struct jsonrpc_method_entry_t *old;
+				old = it->next;
 				if (it->next != NULL) {
-					struct jsonrpc_method_entry_t *old;
-					old = it->next;
 					it->next = it->next->next;
-					free(old);
-					break;
 				}
+				free(old);
+				break;
 			}
 		}
+	}
+
+	if (json_error) {
+		json_response = jsonrpc_error_response(json_id, json_error);
+		goto done;
 	}
 
 	if (entry == NULL) {
@@ -294,10 +297,6 @@ json_t *jsonrpc_handle_request_single(json_t *json_request, struct jsonrpc_metho
 			json_response = jsonrpc_error_response(json_id, json_result);
 		}
 	}
-	else {
-		json_result = jsonrpc_error_object_predefined(JSONRPC_INTERNAL_ERROR, NULL);
-		json_response = jsonrpc_error_response(json_id, json_result);
-	}
 
 	rc = entry->type;
 done:
@@ -318,12 +317,11 @@ done:
 	return json_response;
 }
 
-json_t *jsonrpc_response(json_t *json_request,
+json_t *jsonrpc_jresponse(json_t *json_request,
 	struct jsonrpc_method_entry_t method_table[],
 	void *userdata)
 {
 	json_t *json_response;
-
 	if (!json_request) {
 		json_response = jsonrpc_error_response(NULL,
 				jsonrpc_error_object_predefined(JSONRPC_PARSE_ERROR, NULL));
@@ -362,44 +360,51 @@ char *jsonrpc_handler(const char *input, size_t input_len, struct jsonrpc_method
 	request = json_loadb(input, input_len, 0, &error);
 
 	if (!request) {
-		fprintf(stdout, "Syntax error: line %d col %d: %s\n", error.line, error.column, error.text);
+		fprintf(stderr, "Syntax error: line %d col %d: %s\n", error.line, error.column, error.text);
 	}
-	response = jsonrpc_response(request, method_table, userdata);
-	if (response)
+	response = jsonrpc_jresponse(request, method_table, userdata);
+	if (response) {
 		output = json_dumps(response, JSON_INDENT(2));
+		json_decref(response);
+	}
 
-	json_decref(request);
-	json_decref(response);
+	if (request) {
+		json_decref(request);
+	}
 
 	return output;
 }
 
-json_t *jsonrpc_request(const char *method, json_t *params,
-		struct jsonrpc_method_entry_t method_table[],
-		unsigned long *id, struct jsonrpc_method_entry_t **pentry)
+json_t *jsonrpc_jrequest(const char *method,
+		struct jsonrpc_method_entry_t method_table[], char *userdata,
+		unsigned long *pid)
 {
 	struct jsonrpc_method_entry_t *entry;
 	json_t *request = NULL;
+	json_t *params = NULL;
+	unsigned long id;
 
 	for (entry=method_table; entry->name!=NULL; entry++) {
-		if (0==strcmp(entry->name, method))
+		if (0==strcmp(entry->name, method) && entry->type == TYPE_SEND_REQUEST) {
+			struct jsonrpc_method_entry_t *new = calloc(1, sizeof(*new));
+			if (new) {
+				memcpy(new, entry, sizeof(*new));
+				new->id = id;
+				entry->next = new;
+			}
+		}
+		if (0==strcmp(entry->name, method) && entry->type == 'r') {
 			break;
+		}
 	}
 
 	if (entry == NULL || entry->name==NULL) {
 		goto done;
 	}
 
-	if (entry->type == TYPE_SEND_REQUEST)	{
-		srandom(time(NULL));
-		*id = random();
-		*pentry = entry;
+	if (entry->funcptr) {
+		entry->funcptr(NULL, &params, userdata);
 	}
-	else {
-		*id = 0;
-		*pentry = entry;
-	}
-
 	if (entry->params_spec) {
 		json_t *error_obj = jsonrpc_validate_params(params, entry->params_spec);
 		if (error_obj) {
@@ -407,14 +412,20 @@ json_t *jsonrpc_request(const char *method, json_t *params,
 		}
 	}
 
-	if (*id != 0) {
-		request = json_pack("{s:s,s:i,s:s,s:o}",
+	if (entry->type == 'r')	{
+		srandom(time(NULL));
+		id = random();
+		if (pid != NULL)
+			*pid = id;
+		json_error_t error;
+		request = json_pack_ex(&error, 0, "{s:s,s:i,s:s,s:o?}",
 			"jsonrpc", "2.0",
-			"id", *id,
+			"id", id,
 			"method", method,
 			"params", params);
 	} else {
-		request = json_pack("{s:s,s:s,s:o}",
+		json_error_t error;
+		request = json_pack_ex(&error, 0, "{s:s,s:s,s:o}",
 			"jsonrpc", "2.0",
 			"method", method,
 			"params", params);
@@ -422,6 +433,20 @@ json_t *jsonrpc_request(const char *method, json_t *params,
 	return request;
 done:
 	return NULL;
+}
+
+char *jsonrpc_request(const char *method, int methodlen,
+		struct jsonrpc_method_entry_t method_table[], char *userdata,
+		unsigned long *pid)
+{
+	char *output = NULL;
+
+	json_t *request =jsonrpc_jrequest( method, method_table, userdata, pid);
+	if (request)
+		output = json_dumps(request, JSON_INDENT(2));
+
+	json_decref(request);
+	return output;
 }
 
 int jsonrpc_stringify(json_t *jsonrpc, char *output, size_t output_len)
