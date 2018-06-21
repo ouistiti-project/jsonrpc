@@ -1,12 +1,16 @@
 #include <string.h>
 #include <assert.h>
+#include <unistd.h>
 
 #include <zmq.h>
+#include <pthread.h>
 #include "jsonrpc.h"
+
 
 struct user_context_t
 {
 	int count;
+	void *sock;
 };
 
 static char *json_value_as_string(json_t *value)
@@ -123,7 +127,8 @@ static int method_counter(json_t *json_params, json_t **result, void *userdata)
 {
 	struct user_context_t *userctx = (struct user_context_t *)userdata;
 	userctx->count++;
-	*result = json_integer(userctx->count);
+	*result = json_pack("{s:i}", "counter", userctx->count);
+	printf("count %d\n", userctx->count);
 	return 0;
 }
 
@@ -149,7 +154,7 @@ static int method_subtract(json_t *json_params, json_t **result, void *userdata)
 		return -1;
 	}
 	
-	*result = json_real(x - y);
+	*result = json_pack("{s:f}", "subtract", (x - y));
 	return 0;
 }
 
@@ -162,7 +167,7 @@ static int method_sum(json_t *json_params, json_t **result, void *userdata)
 		double value = json_number_value(json_array_get(json_params, k));
 		total += value;
 	}
-	*result = json_real(total);
+	*result = json_pack("{s:f}", "sum", total);
 	return 0;
 }
 
@@ -171,37 +176,43 @@ static struct jsonrpc_method_entry_t method_table[] = {
 	{ 'r', "iterate", method_test_iter, "o" },
 	{ 'r', "apperror", method_test_apperror, "" },
 	{ 'r', "echo", method_echo, "o" },
+	{ 'n', "counter", method_counter, "{s:i}" },
 	{ 'r', "counter", method_counter, "" },
 	{ 'r', "subtract", method_subtract, "o" },
 	{ 'r', "sum", method_sum, "[]" },
-	{ NULL },
+	{ 0, NULL },
 };
+
+void _zfree(void *data, void *hint)
+{
+	free(data);
+}
 
 int main()
 {
 	void *ctx = zmq_ctx_new();
-	void *sock = zmq_socket(ctx, ZMQ_REP);
+	void *sock = zmq_socket(ctx, ZMQ_PAIR);
 	int rc = zmq_bind(sock, "tcp://127.0.0.1:10000");
 	assert(rc!=-1);
 
-	struct user_context_t userctx = {0};
-	
+	struct user_context_t userctx = {.count = 0, .sock = sock};
 	while (1) 
 	{
 		zmq_msg_t msg;
 		zmq_msg_init(&msg);
 		zmq_msg_recv(&msg, sock, 0);
-
-		char *output = jsonrpc_handler((char *)zmq_msg_data(&msg), 
-				zmq_msg_size(&msg), method_table, &userctx);
-
+		char *input = (char *)zmq_msg_data(&msg);
+		int inputlen = zmq_msg_size(&msg);
+		printf("receive:\n%s\n", input);
+		char *output = jsonrpc_handler(input, inputlen, method_table, &userctx);
 		zmq_msg_close(&msg);
 
 		if (output) {
-			zmq_send(sock, output, strlen(output), 0);
-			free(output);
-		} else {
-			zmq_send(sock, "", 0, 0);
+			printf("send:\n%s\n", output);
+			zmq_msg_t msg;
+			zmq_msg_init_data(&msg, output, strlen(output),_zfree, NULL);
+			zmq_msg_send(&msg, sock, 0);
+			zmq_msg_close(&msg);
 		}
 	}
 	
