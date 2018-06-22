@@ -13,15 +13,8 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include <zmq.h>
-#include <pthread.h>
 #include "jsonrpc.h"
-
-struct user_context_t
-{
-	int count;
-	void *sock;
-};
+#include "test.h"
 
 static char *json_value_as_string(json_t *value)
 {
@@ -149,7 +142,7 @@ static int method_sum(json_t *json_params, json_t **params, void *userdata)
 	return 0;
 }
 
-static struct jsonrpc_method_entry_t method_table[] = {
+struct jsonrpc_method_entry_t method_table[] = {
 	{ 'n', "counter", method_response, "o" },
 	{ 'a', "foreach",method_response, "o" },
 	{ 'a', "iterate", method_response, "o" },
@@ -167,83 +160,3 @@ static struct jsonrpc_method_entry_t method_table[] = {
 	{ 'r', "sum", method_sum, "[]" },
 	{ 0, NULL},
 };
-
-json_t *client_error_handler(json_t *json_id, json_t *json_error)
-{
-	json_t *data = json_object_get(json_error, "data");
-	if (json_is_string(data))
-		printf("error :%s\n", json_string_value(data));
-	return NULL;
-}
-
-void wait_msg(struct user_context_t *userctx)
-{
-	unsigned int rc;
-	zmq_msg_t msg;
-	zmq_msg_init(&msg);
-
-	rc = zmq_msg_recv(&msg, userctx->sock, 0);
-
-	char *output = jsonrpc_handler((char *)zmq_msg_data(&msg), 
-			zmq_msg_size(&msg), method_table, (char *)userctx);
-	if (output != NULL) {
-		printf("error: %s\n", output);
-		free(output);
-	}
-
-	zmq_msg_close(&msg);
-}
-
-int main()
-{
-	void *ctx = zmq_ctx_new();
-	void *sock = zmq_socket(ctx, ZMQ_PAIR);
-	int rc = zmq_connect(sock, "tcp://127.0.0.1:10000");
-	assert(rc!=-1);
-
-	struct user_context_t userctx = {.count = 0, .sock = sock};
-	jsonrpc_set_errorhandler(client_error_handler);
-
-	while (1) 
-	{
-		int ret;
-		fd_set rfds;
-		int maxfd = 0;
-
-		FD_ZERO(&rfds);
-		FD_SET(0, &rfds);
-		ret = select(maxfd + 1, &rfds, NULL, NULL, NULL);
-		if (ret > 0)
-		{
-			if (FD_ISSET(0, &rfds))
-			{
-				char buff[256];
-				ret = read(0, buff, sizeof(buff));
-				if (ret > 0)
-				{
-					char *request = NULL;
-					json_t *params = NULL;
-					unsigned long id;
-					buff[ret] = 0;
-					if (buff[ret-1] = '\n')
-						buff[ret-1] = 0;
-					if (!strncmp(buff, "quit", 4)) {
-						break;
-					}
-					request = jsonrpc_request(buff, strlen(buff), method_table,
-							(char *)&userctx, &id);
-					if (request != NULL) {
-						rc = zmq_send(sock, request, strlen(request), 0);
-						free(request);
-						request = NULL;
-						wait_msg(&userctx);
-					}
-				}
-			}
-		}
-	}
-	zmq_close(sock);
-	zmq_ctx_destroy(ctx);
-
-	return 0;
-}
