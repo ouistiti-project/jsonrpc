@@ -393,7 +393,7 @@ json_t *jsonrpc_jrequest(const char *method,
 				entry->next = new;
 			}
 		}
-		if (0==strcmp(entry->name, method) && entry->type == 'r') {
+		if (0==strcmp(entry->name, method) && (entry->type == 'r' || entry->type == 'n')) {
 			break;
 		}
 	}
