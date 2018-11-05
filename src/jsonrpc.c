@@ -225,7 +225,8 @@ json_t *jsonrpc_validate_params(json_t *json_params, const char *params_spec)
 	return data ? jsonrpc_error_object_predefined(JSONRPC_INVALID_PARAMS, data) : NULL;
 }
 
-json_t *jsonrpc_handle_request_single(json_t *json_request, struct jsonrpc_method_entry_t method_table[],
+json_t *jsonrpc_handle_request_single(json_t *json_request,
+	struct jsonrpc_method_entry_t method_table[],
 	void *userdata)
 {
 	int rc;
@@ -243,13 +244,17 @@ json_t *jsonrpc_handle_request_single(json_t *json_request, struct jsonrpc_metho
 
 	if (rc != TYPE_RECEIVE_RESPONSE)
 	{
-		for (entry=method_table; entry->name!=NULL; entry++) {
-			if (0==strcmp(entry->name, str_method) && entry->type == rc) {
+		for (entry=method_table; entry->name!=NULL; entry++)
+		{
+			if (0==strcmp(entry->name, str_method) && entry->type == rc)
+			{
 				break;
 			}
 		}
 	}
-	else if (json_id != NULL) {
+	else if (json_id != NULL)
+	{
+		/** receive response to a request **/
 		unsigned long id = json_integer_value(json_id);
 		for (entry=method_table; entry->name!=NULL; entry++) {
 			if (entry->next != NULL && entry->type == rc) {
@@ -350,8 +355,8 @@ json_t *jsonrpc_jresponse(json_t *json_request,
 	return json_response;
 }
 
-char *jsonrpc_handler(const char *input, size_t input_len, struct jsonrpc_method_entry_t method_table[],
-	void *userdata)
+char *jsonrpc_handler(const char *input, size_t input_len,
+	struct jsonrpc_method_entry_t method_table[], void *userdata)
 {
 	json_t *request, *response;
 	json_error_t error;
@@ -450,7 +455,7 @@ char *jsonrpc_request(const char *method, int methodlen,
 {
 	char *output = NULL;
 
-	json_t *request =jsonrpc_jrequest( method, method_table, userdata, pid);
+	json_t *request = jsonrpc_jrequest( method, method_table, userdata, pid);
 	if (request)
 		output = json_dumps(request, JSON_INDENT(2));
 
