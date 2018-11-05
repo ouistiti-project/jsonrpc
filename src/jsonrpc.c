@@ -384,15 +384,8 @@ json_t *jsonrpc_jrequest(const char *method,
 	json_t *params = NULL;
 	unsigned long id;
 
-	for (entry=method_table; entry->name!=NULL; entry++) {
-		if (0==strcmp(entry->name, method) && entry->type == TYPE_SEND_REQUEST) {
-			struct jsonrpc_method_entry_t *new = calloc(1, sizeof(*new));
-			if (new) {
-				memcpy(new, entry, sizeof(*new));
-				new->id = id;
-				entry->next = new;
-			}
-		}
+	for (entry=method_table; entry->name!=NULL; entry++)
+	{
 		if (0==strcmp(entry->name, method) && (entry->type == 'r' || entry->type == 'n')) {
 			break;
 		}
@@ -415,6 +408,22 @@ json_t *jsonrpc_jrequest(const char *method,
 	if (entry->type == 'r')	{
 		srandom(time(NULL));
 		id = random();
+		/**
+		 * because we need to keep the id for the response
+		 * we create a new entry into the table which will be destroy on the response
+		 */
+		struct jsonrpc_method_entry_t *entry;
+		for (entry=method_table; entry->name!=NULL; entry++)
+		{
+			if (0==strcmp(entry->name, method) && entry->type == TYPE_SEND_REQUEST) {
+				struct jsonrpc_method_entry_t *new = calloc(1, sizeof(*new));
+				if (new) {
+					memcpy(new, entry, sizeof(*new));
+					new->id = id;
+					entry->next = new;
+				}
+			}
+		}
 		if (pid != NULL)
 			*pid = id;
 		json_error_t error;
