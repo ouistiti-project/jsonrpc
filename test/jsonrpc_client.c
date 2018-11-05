@@ -143,7 +143,6 @@ static int method_sum(json_t *json_params, json_t **params, void *userdata)
 }
 
 struct jsonrpc_method_entry_t method_table[] = {
-	{ 'n', "counter", method_response, "o" },
 	{ 'a', "foreach",method_response, "o" },
 	{ 'a', "iterate", method_response, "o" },
 	{ 'a', "apperror", method_response, "" },

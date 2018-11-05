@@ -117,6 +117,15 @@ int main()
 	int rc = zmq_connect(sock, "tcp://127.0.0.1:10000");
 	assert(rc!=-1);
 
+	struct jsonrpc_method_entry_t *entry;
+	for (entry=method_table; entry->name!=NULL; entry++)
+	{
+		if (entry->type == 'a')
+		{
+			printf("try: %s\n", entry->name);
+		}
+	}
+	
 	struct user_context_t userctx = {.count = 0, .sock = sock};
 	jsonrpc_set_errorhandler(client_error_handler);
 

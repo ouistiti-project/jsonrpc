@@ -39,22 +39,28 @@ static int method_test_foreach(json_t *json_params, json_t **result, void *userd
 #if JANSSON_VERSION_HEX >= 0x020500
 		size_t index;
 		json_t *value;
+		int count = 0;
 		json_array_foreach(json_params, index, value) {
 			char *str = json_value_as_string(value);
 			printf("%ld: %s\n", index, str);
+			count++;
 			free(str);
 		}
+		*result = json_pack("{s:i}", "count", count);
 #else
 		printf("JSON_ARRAY_FOREACH unsupported\n");
 #endif
 	} else if (json_is_object(json_params)) {
 		const char *key;
 		json_t *value;
+		int count = 0;
 		json_object_foreach(json_params, key, value) {
 			char *str = json_value_as_string(value);
 			printf("%s: %s\n", key, str);
+			count++;
 			free(str);
 		}
+		*result = json_pack("{s:i}", "count", count);
 	} else {
 		assert(0);
 	}
@@ -74,8 +80,10 @@ static int method_test_iter(json_t *json_params, json_t **result, void *userdata
 			printf("%ld: %s\n", idx, str);
 			free(str);
 		}
+		*result = json_pack("{s:i}", "count", len);
 	} else if (json_is_object(json_params)) {
 		void *iter = json_object_iter(json_params);
+		int count = 0;
 		while (iter)
 		{
 			const char *key = json_object_iter_key(iter);
@@ -83,10 +91,12 @@ static int method_test_iter(json_t *json_params, json_t **result, void *userdata
 
 			char *str = json_value_as_string(value);
 			printf("%s: %s\n", key, str);
+			count++;
 			free(str);
 
 			iter = json_object_iter_next(json_params, iter);
 		}
+		*result = json_pack("{s:i}", "count", count);
 	} else {
 		assert(0);
 	}
