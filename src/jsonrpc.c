@@ -461,7 +461,13 @@ char *jsonrpc_request(const char *method, int methodlen,
 int jsonrpc_stringify(json_t *jsonrpc, char *output, size_t output_len)
 {
 	int ret;
-	ret = json_dumpb(jsonrpc, output, output_len, 0);
+#if JANSSON_VERSION_HEX < 0x021000
+    char *buf = json_dumps(jsonrpc, 0);
+    strncpy(output, buf, output_len);
+    ret = strlen(output);
+#else
+    ret = json_dumpb(jsonrpc, output, output_len, 0);
+#endif
 	return ret;
 }
 
